@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 
 import numpy as np
@@ -22,6 +22,7 @@ sys.path.append(os.path.join(os.path.dirname("__file__"), '..', '..', '..'))
 # BabyARC-fewshot dataset for classification:
 from reasoning.experiments.concept_energy import get_dataset, ConceptDataset, ConceptFewshotDataset
 from reasoning.pytorch_net.util import init_args, plot_matrices, get_device
+from reasoning.util import visualize_matrices
 from reasoning.fsl_baselines.babyarc_eval_fewshot import load_model, get_babyarc_dataloader
 
 
@@ -109,11 +110,11 @@ LABEL_TO_C_LABEL = {
 }
 
 
-# In[4]:
+# In[ ]:
 
 
 class DATA_LOADER(object):
-    def __init__(self, dataset, aux_datasource, device='cuda'):
+    def __init__(self, dataset, aux_datasource, device='cuda', is_full_info=False):
 
         print("The current working directory is")
         print(os.getcwd())
@@ -133,6 +134,7 @@ class DATA_LOADER(object):
         self.data_path = data_path
         self.device = device
         self.dataset = dataset
+        self.is_full_info = is_full_info
         self.auxiliary_data_source = aux_datasource
 
         self.all_data_sources = ['resnet_features'] + [self.auxiliary_data_source]
@@ -319,7 +321,9 @@ class DATA_LOADER(object):
         self.data['train_seen']['resnet_features'] = train_feature
         self.data['train_seen']['labels']= train_label
         self.data['train_seen'][self.auxiliary_data_source] = self.aux_data[train_label]   # [19832, 85]
-        self.data['train_seen']['masks'] = train_mask
+        if self.is_full_info:
+            self.data['train_seen']['masks'] = train_mask
+            self.data['train_seen']['imgs'] = train_img
 
         self.data['train_unseen'] = {}
         self.data['train_unseen']['resnet_features'] = None
@@ -333,6 +337,7 @@ class DATA_LOADER(object):
         self.data['test_unseen']['resnet_features'] = test_unseen_feature
         self.data['test_unseen'][self.auxiliary_data_source] = self.aux_data[test_unseen_label]  # [5685, 85]
         self.data['test_unseen']['labels'] = test_unseen_label  # [5685]
+        self.data['test_unseen']['imgs'] = test_unseen_img
 
         self.novelclass_aux_data = self.aux_data[self.novelclasses]  # [3, 11]
         self.seenclass_aux_data = self.aux_data[self.seenclasses] # [11, 11]
@@ -564,5 +569,31 @@ class DATA_LOADER(object):
         if use_hie:
             self.data['train_seen_unseen_mixed']['wordnet'] = torch.cat((self.data['train_seen']['wordnet'],self.data['train_unseen']['wordnet']),dim=0)
 
-#d = DATA_LOADER()
+
+
+# In[ ]:
+
+
+if __name__ == "__main__":
+    d = DATA_LOADER(dataset="c-Line->Eshape", aux_datasource="attributes", is_full_info=True)
+    
+    for i in range(44000,44040):
+        img = d.data['train_seen']['imgs'][i]
+        masks = d.data['train_seen']['masks'][i]
+        attr = d.data['train_seen']['attributes'][i]
+        label = d.data['train_seen']['labels'][i]
+        visualize_matrices([img.argmax(0)])
+        plot_matrices(masks, images_per_row=6)
+        print("attr: {},  label: {} c: {}".format(attr, label, LABEL_TO_C_LABEL[label.item()]))
+        print()
+
+    for i in range(40):
+        img = d.data['test_unseen']['imgs'][i]
+        # masks = d.data['test_unseen']['masks'][i]
+        attr = d.data['test_unseen']['attributes'][i]
+        label = d.data['test_unseen']['labels'][i]
+        visualize_matrices([img.argmax(0)])
+        # plot_matrices(masks, images_per_row=6)
+        print("attr: {},  label: {} c: {}".format(attr, label, LABEL_TO_C_LABEL[label.item()]))
+        print()
 

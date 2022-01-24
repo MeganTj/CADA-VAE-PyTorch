@@ -3,7 +3,7 @@
 
 # ## Settings:
 
-# In[1]:
+# In[ ]:
 
 
 ### execute this function to train and test the vae-model
@@ -48,6 +48,7 @@ parser.add_argument('--dataset')
 parser.add_argument('--num_shots',type=int)
 parser.add_argument('--generalized', type = str2bool)
 parser.add_argument('--epochs', default=100, type=int)
+parser.add_argument('--load_vae_epoch', default=-1, type=int)
 parser.add_argument('--batch_size', default=50, type=int)
 parser.add_argument('--gpuid', default="0", type=str)
 
@@ -60,6 +61,7 @@ try:
     args.num_shots = 0
     args.generalized = False
     args.epochs = 5
+    args.load_vae_epoch = 5
     args.gpuid = "0"
     is_jupyter = True
 except:
@@ -69,7 +71,7 @@ except:
 
 # ## Model definition:
 
-# In[2]:
+# In[ ]:
 
 
 class LINEAR_LOGSOFTMAX(nn.Module):
@@ -135,19 +137,13 @@ class Model(nn.Module):
         self.encoder = {}
 
         for datatype, dim in zip(self.all_data_sources, feature_dimensions):
-            if datatype == "resnet_features" and self.DATASET.startswith("c-"):
-                self.encoder[datatype] = models.concept_encoder(dim, self.latent_size, self.hidden_size_rule[datatype], self.device)
-            else:
-                self.encoder[datatype] = models.encoder_template(dim, self.latent_size, self.hidden_size_rule[datatype], self.device)
+            self.encoder[datatype] = models.encoder_template(dim, self.latent_size, self.hidden_size_rule[datatype], self.device)
 
             print(str(datatype) + ' ' + str(dim))
 
         self.decoder = {}
         for datatype, dim in zip(self.all_data_sources, feature_dimensions):
-            if datatype == "resnet_features" and self.DATASET.startswith("c-"):
-                self.decoder[datatype] = models.concept_decoder(self.latent_size, dim, self.hidden_size_rule[datatype], self.device)
-            else:
-                self.decoder[datatype] = models.decoder_template(self.latent_size, dim, self.hidden_size_rule[datatype], self.device)
+            self.decoder[datatype] = models.decoder_template(self.latent_size, dim, self.hidden_size_rule[datatype], self.device)
 
         # An optimizer for all encoders and decoders is defined here
         parameters_to_optimize = list(self.parameters())
@@ -314,7 +310,6 @@ class Model(nn.Module):
             self.dataset.transfer_features(self.num_shots, num_queries='num_features')
 
         history = []  # stores accuracies
-
 
         cls_seenclasses = self.dataset.seenclasses
         cls_novelclasses = self.dataset.novelclasses
@@ -523,7 +518,7 @@ class Model(nn.Module):
 
 # ## Model init:
 
-# In[3]:
+# In[ ]:
 
 
 ########################################
@@ -656,7 +651,7 @@ model.to(hyperparameters['device'])
 
 # ## Training:
 
-# In[4]:
+# In[ ]:
 
 
 """
@@ -671,7 +666,14 @@ for d in model.all_data_sources_without_duplicates:
 ########################################
 """
 
-losses = model.train_vae()
+is_save_state = True
+if args.load_vae_epoch != -1:
+    state = torch.load('CADA_trained_epoch_{}.pth.tar'.format(args.load_vae_epoch))
+    for d in state['encoder']:
+        model.encoder[d].load_state_dict(state['encoder'][d])
+        model.decoder[d].load_state_dict(state['decoder'][d])
+else:
+    losses = model.train_vae()
 
 u,s,h,history = model.train_classifier()
 
@@ -696,13 +698,7 @@ for d in model.all_data_sources:
     state['encoder'][d] = model.encoder[d].state_dict()
     state['decoder'][d] = model.decoder[d].state_dict()
 
-
-torch.save(state, 'CADA_trained.pth.tar')
-print('>> saved')
-
-
-# In[ ]:
-
-
-
+if is_save_state:
+    torch.save(state, 'CADA_trained_epoch_{}.pth.tar'.format(args.epochs))
+    print('>> saved')
 
