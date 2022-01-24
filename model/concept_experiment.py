@@ -3,7 +3,7 @@
 
 # ## Settings:
 
-# In[1]:
+# In[ ]:
 
 
 ### execute this function to train and test the vae-model
@@ -26,6 +26,14 @@ from data_loader import DATA_LOADER as dataloader
 import final_classifier as  classifier
 import models
 
+import sys, os
+sys.path.append(os.path.join(os.path.dirname("__file__"), '..'))
+sys.path.append(os.path.join(os.path.dirname("__file__"), '..', '..'))
+sys.path.append(os.path.join(os.path.dirname("__file__"), '..', '..', '..'))
+# BabyARC-fewshot dataset for classification:
+from reasoning.experiments.concept_energy import get_dataset, ConceptDataset
+from reasoning.pytorch_net.util import init_args, plot_matrices, get_device
+
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
         return True
@@ -39,6 +47,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--dataset')
 parser.add_argument('--num_shots',type=int)
 parser.add_argument('--generalized', type = str2bool)
+parser.add_argument('--epochs', default=100, type=int)
+parser.add_argument('--batch_size', default=50, type=int)
 
 try:
     get_ipython().run_line_magic('matplotlib', 'inline')
@@ -47,6 +57,7 @@ try:
     args.dataset = "AWA1"
     args.num_shots = 0
     args.generalized = False
+    args.epochs = 100
     is_jupyter = True
 except:
     args = parser.parse_args()
@@ -55,7 +66,7 @@ except:
 
 # ## Model definition:
 
-# In[2]:
+# In[ ]:
 
 
 class LINEAR_LOGSOFTMAX(nn.Module):
@@ -139,7 +150,7 @@ class Model(nn.Module):
     def reparameterize(self, mu, logvar):
         if self.reparameterize_with_noise:
             sigma = torch.exp(logvar)
-            eps = torch.cuda.FloatTensor(logvar.size()[0],1).normal_(0,1)
+            eps = torch.FloatTensor(logvar.size()[0],1).normal_(0,1).to(device)
             eps  = eps.expand(sigma.size())
             return mu + sigma*eps
         else:
@@ -149,6 +160,9 @@ class Model(nn.Module):
         pass
 
     def map_label(self,label, classes):
+        """
+        label: [1,2,5,6]
+        """
         mapped_label = torch.LongTensor(label.size()).to(self.device)
         for i in range(classes.size(0)):
             mapped_label[label==classes[i]] = i
@@ -161,9 +175,8 @@ class Model(nn.Module):
         # Encode image features and additional
         # features
         ##############################################
-
-        mu_img, logvar_img = self.encoder['resnet_features'](img)
-        z_from_img = self.reparameterize(mu_img, logvar_img)
+        mu_img, logvar_img = self.encoder['resnet_features'](img)  # [B, 64]
+        z_from_img = self.reparameterize(mu_img, logvar_img)  # [B, 64]
 
         mu_att, logvar_att = self.encoder[self.auxiliary_data_source](att)
         z_from_att = self.reparameterize(mu_att, logvar_att)
@@ -172,8 +185,8 @@ class Model(nn.Module):
         # Reconstruct inputs
         ##############################################
 
-        img_from_img = self.decoder['resnet_features'](z_from_img)
-        att_from_att = self.decoder[self.auxiliary_data_source](z_from_att)
+        img_from_img = self.decoder['resnet_features'](z_from_img)  # [B, 2048] 
+        att_from_att = self.decoder[self.auxiliary_data_source](z_from_att)    # [B, 48]
 
         reconstruction_loss = self.reconstruction_criterion(img_from_img, img)                               + self.reconstruction_criterion(att_from_att, att)
 
@@ -205,15 +218,15 @@ class Model(nn.Module):
 
         f1 = 1.0*(self.current_epoch - self.warmup['cross_reconstruction']['start_epoch'] )/(1.0*( self.warmup['cross_reconstruction']['end_epoch']- self.warmup['cross_reconstruction']['start_epoch']))
         f1 = f1*(1.0*self.warmup['cross_reconstruction']['factor'])
-        cross_reconstruction_factor = torch.cuda.FloatTensor([min(max(f1,0),self.warmup['cross_reconstruction']['factor'])])
+        cross_reconstruction_factor = torch.tensor([min(max(f1,0),self.warmup['cross_reconstruction']['factor'])], dtype=torch.float32, device=device)
 
         f2 = 1.0 * (self.current_epoch - self.warmup['beta']['start_epoch']) / ( 1.0 * (self.warmup['beta']['end_epoch'] - self.warmup['beta']['start_epoch']))
         f2 = f2 * (1.0 * self.warmup['beta']['factor'])
-        beta = torch.cuda.FloatTensor([min(max(f2, 0), self.warmup['beta']['factor'])])
+        beta = torch.tensor([min(max(f2, 0), self.warmup['beta']['factor'])], dtype=torch.float32, device=device)
 
         f3 = 1.0*(self.current_epoch - self.warmup['distance']['start_epoch'] )/(1.0*( self.warmup['distance']['end_epoch']- self.warmup['distance']['start_epoch']))
         f3 = f3*(1.0*self.warmup['distance']['factor'])
-        distance_factor = torch.cuda.FloatTensor([min(max(f3,0),self.warmup['distance']['factor'])])
+        distance_factor = torch.tensor([min(max(f3,0),self.warmup['distance']['factor'])], dtype=torch.float32, device=device)
 
         ##############################################
         # Put the loss together and call the optimizer
@@ -239,8 +252,8 @@ class Model(nn.Module):
         losses = []
         # self.dataloader = data.DataLoader(self.dataset,batch_size= self.batch_size,shuffle= True,drop_last=True)#,num_workers = 4)
 
-        self.dataset.novelclasses =self.dataset.novelclasses.long().cuda()
-        self.dataset.seenclasses =self.dataset.seenclasses.long().cuda()
+        self.dataset.novelclasses =self.dataset.novelclasses.long().to(device)
+        self.dataset.seenclasses =self.dataset.seenclasses.long().to(device)
         #leave both statements
         self.train()
         self.reparameterize_with_noise = True
@@ -253,7 +266,7 @@ class Model(nn.Module):
             for iters in range(0, self.dataset.ntrain, self.batch_size):
                 i+=1
 
-                label, data_from_modalities = self.dataset.next_batch(self.batch_size)
+                label, data_from_modalities = self.dataset.next_batch(self.batch_size)  # label: [B], data_from_modalities: ([B, F_img:2048], [B, F_attr:85])
 
                 label= label.long().to(self.device)
                 for j in range(len(data_from_modalities)):
@@ -290,27 +303,26 @@ class Model(nn.Module):
         cls_seenclasses = self.dataset.seenclasses
         cls_novelclasses = self.dataset.novelclasses
 
+        train_seen_feat = self.dataset.data['train_seen']['resnet_features']  # [19832, 2048]
+        train_seen_label = self.dataset.data['train_seen']['labels']  # [19832]
 
-        train_seen_feat = self.dataset.data['train_seen']['resnet_features']
-        train_seen_label = self.dataset.data['train_seen']['labels']
+        novelclass_aux_data = self.dataset.novelclass_aux_data  # [10, F_attr:85], access as novelclass_aux_data['resnet_features'], novelclass_aux_data['attributes']
+        seenclass_aux_data = self.dataset.seenclass_aux_data  # [40, F_attr:85]
 
-        novelclass_aux_data = self.dataset.novelclass_aux_data  # access as novelclass_aux_data['resnet_features'], novelclass_aux_data['attributes']
-        seenclass_aux_data = self.dataset.seenclass_aux_data
-
-        novel_corresponding_labels = self.dataset.novelclasses.long().to(self.device)
-        seen_corresponding_labels = self.dataset.seenclasses.long().to(self.device)
+        novel_corresponding_labels = self.dataset.novelclasses.long().to(self.device)  # [10]
+        seen_corresponding_labels = self.dataset.seenclasses.long().to(self.device)  #[40]
 
 
         # The resnet_features for testing the classifier are loaded here
         novel_test_feat = self.dataset.data['test_unseen'][
-            'resnet_features']  # self.dataset.test_novel_feature.to(self.device)
+            'resnet_features']  # [5685, 2048], self.dataset.test_novel_feature.to(self.device)
         seen_test_feat = self.dataset.data['test_seen'][
-            'resnet_features']  # self.dataset.test_seen_feature.to(self.device)
-        test_seen_label = self.dataset.data['test_seen']['labels']  # self.dataset.test_seen_label.to(self.device)
-        test_novel_label = self.dataset.data['test_unseen']['labels']  # self.dataset.test_novel_label.to(self.device)
+            'resnet_features']  # [4958, 2048] self.dataset.test_seen_feature.to(self.device)
+        test_seen_label = self.dataset.data['test_seen']['labels']  # [4598], self.dataset.test_seen_label.to(self.device)
+        test_novel_label = self.dataset.data['test_unseen']['labels']  # [5685], self.dataset.test_novel_label.to(self.device)
 
-        train_unseen_feat = self.dataset.data['train_unseen']['resnet_features']
-        train_unseen_label = self.dataset.data['train_unseen']['labels']
+        train_unseen_feat = self.dataset.data['train_unseen']['resnet_features']  # None
+        train_unseen_label = self.dataset.data['train_unseen']['labels']  # None
 
 
         # in ZSL mode:
@@ -319,22 +331,21 @@ class Model(nn.Module):
             # novel_corresponding_labels =list of all novel classes (as tensor)
             # test_novel_label = mapped to 0-49 in classifier function
             # those are used as targets, they have to be mapped to 0-49 right here:
-
-            novel_corresponding_labels = self.map_label(novel_corresponding_labels, novel_corresponding_labels)
+            novel_corresponding_labels = self.map_label(novel_corresponding_labels, novel_corresponding_labels)  # before: [ 6,  8, 22, 23, 29, 30, 33, 40, 46, 49]; after: [0,1,...9]
 
             if self.num_shots > 0:
                 # not generalized and at least 1 shot means normal FSL setting (use only unseen classes)
-                train_unseen_label = self.map_label(train_unseen_label, cls_novelclasses)
+                train_unseen_label = self.map_label(train_unseen_label, cls_novelclasses)  # train_unseen_label: shape [5685]: [29, 29, 29,  ..., 46, 46, 46]
 
             # for FSL, we train_seen contains the unseen class examples
             # for ZSL, train seen label is not used
             # if self.num_shots>0:
             #    train_seen_label = self.map_label(train_seen_label,cls_novelclasses)
 
-            test_novel_label = self.map_label(test_novel_label, cls_novelclasses)
+            test_novel_label = self.map_label(test_novel_label, cls_novelclasses)  # [5685]
 
             # map cls novelclasses last
-            cls_novelclasses = self.map_label(cls_novelclasses, cls_novelclasses)
+            cls_novelclasses = self.map_label(cls_novelclasses, cls_novelclasses)  # [10], [0,1,...9]
 
 
         if self.generalized:
@@ -356,11 +367,11 @@ class Model(nn.Module):
 
             self.reparameterize_with_noise = False
 
-            mu1, var1 = self.encoder['resnet_features'](novel_test_feat)
+            mu1, var1 = self.encoder['resnet_features'](novel_test_feat)  # novel_test_feat: [5685, 2048]
             test_novel_X = self.reparameterize(mu1, var1).to(self.device).data
             test_novel_Y = test_novel_label.to(self.device)
 
-            mu2, var2 = self.encoder['resnet_features'](seen_test_feat)
+            mu2, var2 = self.encoder['resnet_features'](seen_test_feat)  # mu2: [4958, 64]
             test_seen_X = self.reparameterize(mu2, var2).to(self.device).data
             test_seen_Y = test_seen_label.to(self.device)
 
@@ -386,8 +397,8 @@ class Model(nn.Module):
 
                         features_of_that_class = features[label == s, :]  # order of features and labels must coincide
                         # if number of selected features is smaller than the number of features we want per class:
-                        multiplier = torch.ceil(torch.cuda.FloatTensor(
-                            [max(1, sample_per_class / features_of_that_class.size(0))])).long().item()
+                        multiplier = torch.ceil(torch.tensor(
+                            [max(1, sample_per_class / features_of_that_class.size(0))], dtype=torch.float32, device=device)).long().item()
 
                         features_of_that_class = features_of_that_class.repeat(multiplier, 1)
 
@@ -402,25 +413,25 @@ class Model(nn.Module):
 
                     return features_to_return, labels_to_return
                 else:
-                    return torch.cuda.FloatTensor([]), torch.cuda.LongTensor([])
+                    return torch.tensor([], device=device), torch.tensor([], dtype=torch.int64, device=device)
 
 
             # some of the following might be empty tensors if the specified number of
             # samples is zero :
 
             img_seen_feat,   img_seen_label   = sample_train_data_on_sample_per_class_basis(
-                train_seen_feat,train_seen_label,self.img_seen_samples )
+                train_seen_feat,train_seen_label,self.img_seen_samples )  # tensor([]), tensor([])
 
             img_unseen_feat, img_unseen_label = sample_train_data_on_sample_per_class_basis(
-                train_unseen_feat, train_unseen_label, self.img_unseen_samples )
+                train_unseen_feat, train_unseen_label, self.img_unseen_samples )  # tensor([]), tensor([])
 
             att_unseen_feat, att_unseen_label = sample_train_data_on_sample_per_class_basis(
                     novelclass_aux_data,
-                    novel_corresponding_labels,self.att_unseen_samples )
+                    novel_corresponding_labels,self.att_unseen_samples )  # [2000, 85], [2000]
 
             att_seen_feat, att_seen_label = sample_train_data_on_sample_per_class_basis(
                 seenclass_aux_data,
-                seen_corresponding_labels, self.att_seen_samples)
+                seen_corresponding_labels, self.att_seen_samples)  # tensor([]), tensor([])
 
             def convert_datapoints_to_z(features, encoder):
                 if features.size(0) != 0:
@@ -428,13 +439,13 @@ class Model(nn.Module):
                     z = self.reparameterize(mu_, logvar_)
                     return z
                 else:
-                    return torch.cuda.FloatTensor([])
+                    return torch.tensor([], dtype=torch.float32, device=device)
 
             z_seen_img   = convert_datapoints_to_z(img_seen_feat, self.encoder['resnet_features'])
             z_unseen_img = convert_datapoints_to_z(img_unseen_feat, self.encoder['resnet_features'])
 
             z_seen_att = convert_datapoints_to_z(att_seen_feat, self.encoder[self.auxiliary_data_source])
-            z_unseen_att = convert_datapoints_to_z(att_unseen_feat, self.encoder[self.auxiliary_data_source])
+            z_unseen_att = convert_datapoints_to_z(att_unseen_feat, self.encoder[self.auxiliary_data_source])  # [2000, 64]
 
             train_Z = [z_seen_img, z_unseen_img ,z_seen_att    ,z_unseen_att]
             train_L = [img_seen_label    , img_unseen_label,att_seen_label,att_unseen_label]
@@ -443,13 +454,19 @@ class Model(nn.Module):
             train_X = [train_Z[i] for i in range(len(train_Z)) if train_Z[i].size(0) != 0]
             train_Y = [train_L[i] for i in range(len(train_L)) if train_Z[i].size(0) != 0]
 
-            train_X = torch.cat(train_X, dim=0)
+            train_X = torch.cat(train_X, dim=0)  # [2000, 64]
             train_Y = torch.cat(train_Y, dim=0)
 
         ############################################################
         ##### initializing the classifier and train one epoch
         ############################################################
 
+        # test_seen_X: [4958, 64]
+        # test_seen_Y:  [4958]
+        # test_novel_X: [5685, 64]
+        # test_novel_Y: [5685]
+        # cls_seenclasses: [40]
+        # cls_novelclasses: [10]: [0,1,...9]
         cls = classifier.CLASSIFIER(clf, train_X, train_Y, test_seen_X, test_seen_Y, test_novel_X,
                                     test_novel_Y,
                                     cls_seenclasses, cls_novelclasses,
@@ -483,17 +500,52 @@ class Model(nn.Module):
             return 0, torch.tensor(cls.acc).item(), 0, history
 
 
+# In[ ]:
+
+
+# concept_args = init_args({
+#     "dataset": "c-Line",
+#     "seed": 1,
+#     "n_examples": 44000,
+#     "canvas_size": 16,
+#     "rainbow_prob": 0.,
+#     "color_avail": "1,2",
+#     "w_type": "image+mask",
+#     "max_n_distractors": 2,
+#     "min_n_distractors": 0,
+#     "allow_connect": True,
+# })
+# concept_dataset, _ = get_dataset(concept_args, is_load=True)
+
+
+# relation_args = init_args({
+#     "dataset": "c-Parallel+VerticalMid+VerticalEdge",
+#     "seed": 1,
+#     "n_examples": 44000,
+#     "canvas_size": 16,
+#     "rainbow_prob": 0.,
+#     "color_avail": "1,2",
+#     "w_type": "image+mask",
+#     "max_n_distractors": 3,
+#     "min_n_distractors": 0,
+#     "allow_connect": True,
+# })
+# relation_dataset, _ = get_dataset(relation_args, is_load=True)
+
+
 # ## Model init:
 
-# In[3]:
+# In[ ]:
 
 
 ########################################
 # the basic hyperparameters
 ########################################
+gpuid = 5
+device = f"cuda:{gpuid}"
 hyperparameters = {
     'num_shots': 0,
-    'device': 'cuda',
+    'device': device,
     'model_specifics': {'cross_reconstruction': True,
                        'name': 'CADA',
                        'distance': 'wasserstein',
@@ -509,14 +561,14 @@ hyperparameters = {
 
     'lr_gen_model': 0.00015,
     'generalized': True,
-    'batch_size': 50,
+    'batch_size': args.batch_size,
     'xyu_samples_per_class': {'SUN': (200, 0, 400, 0),
                               'APY': (200, 0, 400, 0),
                               'CUB': (200, 0, 400, 0),
                               'AWA2': (200, 0, 400, 0),
                               'FLO': (200, 0, 400, 0),
                               'AWA1': (200, 0, 400, 0)},
-    'epochs': 100,
+    'epochs': args.epochs,
     'loss': 'l1',
     'auxiliary_data_source' : 'attributes',
     'lr_cls': 0.001,
