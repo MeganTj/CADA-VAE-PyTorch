@@ -54,7 +54,8 @@ try:
     get_ipython().run_line_magic('matplotlib', 'inline')
     args = parser.parse_args([])
     # Experiment management:
-    args.dataset = "AWA1"
+    # args.dataset = "AWA1"
+    args.dataset = "c-Line->Eshape"
     args.num_shots = 0
     args.generalized = False
     args.epochs = 100
@@ -107,6 +108,7 @@ class Model(nn.Module):
         self.cls_train_epochs = hyperparameters['cls_train_steps']
         self.dataset = dataloader( self.DATASET, copy.deepcopy(self.auxiliary_data_source) , device= self.device )
 
+        feature_dimensions = [2048, self.dataset.aux_data.size(1)]
         if self.DATASET=='CUB':
             self.num_classes=200
             self.num_novel_classes = 50
@@ -116,22 +118,34 @@ class Model(nn.Module):
         elif self.DATASET=='AWA1' or self.DATASET=='AWA2':
             self.num_classes=50
             self.num_novel_classes = 10
-
-        feature_dimensions = [2048, self.dataset.aux_data.size(1)]
+        elif self.DATASET.startswith("c-"):
+            if self.DATASET=='c-Line->Eshape':
+                self.num_classes = 14
+                self.num_novel_classes = 3
+                feature_dimensions = [320, self.dataset.aux_data.size(1)]
+            else:
+                raise
+        else:
+            raise
         
         # Here, the encoders and decoders for all modalities are created and put into dict
 
         self.encoder = {}
 
-        for datatype, dim in zip(self.all_data_sources,feature_dimensions):
-
-            self.encoder[datatype] = models.encoder_template(dim,self.latent_size,self.hidden_size_rule[datatype],self.device)
+        for datatype, dim in zip(self.all_data_sources, feature_dimensions):
+            if datatype == "resnet_features" and self.DATASET.startswith("c-"):
+                self.encoder[datatype] = models.concept_encoder(dim, self.latent_size, self.hidden_size_rule[datatype], self.device)
+            else:
+                self.encoder[datatype] = models.encoder_template(dim, self.latent_size, self.hidden_size_rule[datatype], self.device)
 
             print(str(datatype) + ' ' + str(dim))
 
         self.decoder = {}
-        for datatype, dim in zip(self.all_data_sources,feature_dimensions):
-            self.decoder[datatype] = models.decoder_template(self.latent_size,dim,self.hidden_size_rule[datatype],self.device)
+        for datatype, dim in zip(self.all_data_sources, feature_dimensions):
+            if datatype == "resnet_features" and self.DATASET.startswith("c-"):
+                self.decoder[datatype] = models.concept_decoder(self.latent_size, dim, self.hidden_size_rule[datatype], self.device)
+            else:
+                self.decoder[datatype] = models.decoder_template(self.latent_size, dim, self.hidden_size_rule[datatype], self.device)
 
         # An optimizer for all encoders and decoders is defined here
         parameters_to_optimize = list(self.parameters())
@@ -447,7 +461,7 @@ class Model(nn.Module):
             z_seen_att = convert_datapoints_to_z(att_seen_feat, self.encoder[self.auxiliary_data_source])
             z_unseen_att = convert_datapoints_to_z(att_unseen_feat, self.encoder[self.auxiliary_data_source])  # [2000, 64]
 
-            train_Z = [z_seen_img, z_unseen_img ,z_seen_att    ,z_unseen_att]
+            train_Z = [z_seen_img, z_unseen_img ,z_seen_att    ,z_unseen_att] # only z_seen_att is not None, has shape [2000, 85]
             train_L = [img_seen_label    , img_unseen_label,att_seen_label,att_unseen_label]
 
             # empty tensors are sorted out
@@ -500,39 +514,6 @@ class Model(nn.Module):
             return 0, torch.tensor(cls.acc).item(), 0, history
 
 
-# In[ ]:
-
-
-# concept_args = init_args({
-#     "dataset": "c-Line",
-#     "seed": 1,
-#     "n_examples": 44000,
-#     "canvas_size": 16,
-#     "rainbow_prob": 0.,
-#     "color_avail": "1,2",
-#     "w_type": "image+mask",
-#     "max_n_distractors": 2,
-#     "min_n_distractors": 0,
-#     "allow_connect": True,
-# })
-# concept_dataset, _ = get_dataset(concept_args, is_load=True)
-
-
-# relation_args = init_args({
-#     "dataset": "c-Parallel+VerticalMid+VerticalEdge",
-#     "seed": 1,
-#     "n_examples": 44000,
-#     "canvas_size": 16,
-#     "rainbow_prob": 0.,
-#     "color_avail": "1,2",
-#     "w_type": "image+mask",
-#     "max_n_distractors": 3,
-#     "min_n_distractors": 0,
-#     "allow_connect": True,
-# })
-# relation_dataset, _ = get_dataset(relation_args, is_load=True)
-
-
 # ## Model init:
 
 # In[ ]:
@@ -541,8 +522,8 @@ class Model(nn.Module):
 ########################################
 # the basic hyperparameters
 ########################################
-gpuid = 5
-device = f"cuda:{gpuid}"
+gpuid = "2"
+device = get_device(init_args({"gpuid": gpuid}))
 hyperparameters = {
     'num_shots': 0,
     'device': device,
@@ -583,6 +564,7 @@ hyperparameters = {
 # as determined on the validation spit
 
 cls_train_steps = [
+      {'dataset': 'c-Line->Eshape',  'num_shots': 0, 'generalized': False, 'cls_train_steps': 21},
       {'dataset': 'SUN',  'num_shots': 0, 'generalized': True, 'cls_train_steps': 21},
       {'dataset': 'SUN',  'num_shots': 0, 'generalized': False, 'cls_train_steps': 30},
       {'dataset': 'SUN',  'num_shots': 1, 'generalized': True, 'cls_train_steps': 22},
@@ -623,7 +605,7 @@ cls_train_steps = [
       {'dataset': 'AWA2', 'num_shots': 2, 'generalized': False, 'cls_train_steps': 79},
       {'dataset': 'AWA2', 'num_shots': 10, 'generalized': True, 'cls_train_steps': 86},
       {'dataset': 'AWA2', 'num_shots': 10, 'generalized': False, 'cls_train_steps': 78}
-      ]
+]
 
 ##################################
 # change some hyperparameters here
@@ -652,7 +634,9 @@ else:
     if hyperparameters['num_shots']==0:
         hyperparameters['samples_per_class'] = {'CUB': (0, 0, 200, 0), 'SUN': (0, 0, 200, 0),
                                                     'APY': (0, 0, 200, 0), 'AWA1': (0, 0, 200, 0),
-                                                    'AWA2': (0, 0, 200, 0), 'FLO': (0, 0, 200, 0)}
+                                                    'AWA2': (0, 0, 200, 0), 'FLO': (0, 0, 200, 0),
+                                                    'c-Line->Eshape': (0, 0, 200, 0),
+                                               }
     else:
         hyperparameters['samples_per_class'] = {'CUB': (0, 0, 200, 200), 'SUN': (0, 0, 200, 200),
                                                     'APY': (0, 0, 200, 200), 'AWA1': (0, 0, 200, 200),

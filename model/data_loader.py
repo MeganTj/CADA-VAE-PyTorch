@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[3]:
+# In[1]:
 
 
 import numpy as np
@@ -20,8 +20,13 @@ sys.path.append(os.path.join(os.path.dirname("__file__"), '..'))
 sys.path.append(os.path.join(os.path.dirname("__file__"), '..', '..'))
 sys.path.append(os.path.join(os.path.dirname("__file__"), '..', '..', '..'))
 # BabyARC-fewshot dataset for classification:
-from reasoning.experiments.concept_energy import get_dataset, ConceptDataset
+from reasoning.experiments.concept_energy import get_dataset, ConceptDataset, ConceptFewshotDataset
 from reasoning.pytorch_net.util import init_args, plot_matrices, get_device
+from reasoning.fsl_baselines.babyarc_eval_fewshot import load_model, get_babyarc_dataloader
+
+
+# In[ ]:
+
 
 def map_label(label, classes):
     mapped_label = torch.LongTensor(label.size())
@@ -63,7 +68,6 @@ EMBEDDING_DICT = {
         ],
     },
 }
-
 
 
 def get_label_embedding_from_c_label(c_label, mode):
@@ -218,22 +222,22 @@ class DATA_LOADER(object):
         else:
             raise
 
-        train_feature = []
+        train_img = []
         train_mask = []
         train_label = []
         train_att = []
 
-        test_seen_feature = []
+        test_seen_img = []
         test_seen_label = []
 
-        test_unseen_feature = []
+        test_unseen_img = []
         test_unseen_label = []
         test_unseen_att = []
 
         for data in concept_dataset:
             img, masks, c_label, _ = data  # img: [10,16,16]
             label, c_embedding = get_label_embedding_from_c_label(c_label, mode=mode)
-            train_feature.append(img)
+            train_img.append(img)
             train_label.append(label)
             train_att.append(c_embedding)
             train_mask.append(torch.cat([torch.cat(masks), torch.zeros(masks[0].shape)]))
@@ -241,7 +245,7 @@ class DATA_LOADER(object):
         for data in relation_dataset:
             img, masks, c_label, _ = data  # img: [10,16,16]
             label, c_embedding = get_label_embedding_from_c_label(c_label, mode=mode)
-            train_feature.append(img)
+            train_img.append(img)
             train_label.append(label)
             train_att.append(c_embedding)
             train_mask.append(torch.cat(masks))
@@ -249,16 +253,16 @@ class DATA_LOADER(object):
         for data in test_dataset:
             img, _, c_label, _ = data  # img: [10,16,16]
             label, c_embedding = get_label_embedding_from_c_label(c_label, mode=mode)
-            test_unseen_feature.append(img)
+            test_unseen_img.append(img)
             test_unseen_label.append(label)
             test_unseen_att.append(c_embedding)
 
-        train_feature = torch.stack(train_feature).to(self.device)  # [88000, 10, 16, 16]
+        train_img = torch.stack(train_img).to("cpu")  # [88000, 10, 16, 16]
         train_label = torch.LongTensor(train_label).to(self.device)  # [88000]
         train_att = torch.FloatTensor(train_att).to(self.device)  # [88000, 11]
         train_mask = torch.stack(train_mask).to(self.device)
 
-        test_unseen_feature = torch.stack(test_unseen_feature).to(self.device)  # [400, 10, 16, 16]
+        test_unseen_img = torch.stack(test_unseen_img).to("cpu")  # [400, 10, 16, 16]
         test_unseen_label = torch.LongTensor(test_unseen_label).to(self.device)  # [400]
         test_unseen_att = torch.FloatTensor(test_unseen_att).to(self.device)  # [400, 11]
 
@@ -266,6 +270,39 @@ class DATA_LOADER(object):
         for key, item in EMBEDDING_DICT[mode].items():
             List += item
         self.aux_data = torch.FloatTensor(List).to(self.device)
+        
+        if mode == 'c-Line->Eshape':
+            model_args = init_args({
+                'model': 'resnet12_ssl',
+                'model_path': '/dfs/user/tailin/.results/fsl_baselines/backup/babyarc_resnet12_ssl_ground_lr_0.005_decay_0.0005_trans_2d_trial_1/model_cosmic-water-212.pth',
+                'n_deconv_conv': 0,
+                'lst_channels': [64, 160, 320, 640],
+                'is_3d': False,
+                'use_easy_aug': False,
+                'task': 'ground',
+                'training_ver': '',
+                'fs': 'complex_v2',
+                'data_root': '/raid/data/IncrementLearn/imagenet/Datasets/MiniImagenet/',
+                'simclr': False,
+                'n_aug_support_samples': 5,
+                'num_workers': 3,
+                'test_batch_size': 1,
+                'batch_size': 64,
+                'ft_batch_size': 1,
+                'ft_epochs': 10,
+                'ft_learning_rate': 0.02,
+                'ft_weight_decay': 0.0005,
+                'ft_momentum': 0.9,
+                'ft_adam': False,
+                'data_aug': True,
+                'n_cls': 7
+            })
+        else:
+            raise
+        resnet_model = load_model(model_args).to("cpu")
+        train_feature = resnet_model.encode(train_img).detach().to(self.device)
+        test_seen_feature = []
+        test_unseen_feature = resnet_model.encode(test_unseen_img).detach().to(self.device)
 
         self.seenclasses = torch.from_numpy(np.unique(train_label.cpu().numpy())).to(self.device) # [40]
         self.novelclasses = torch.from_numpy(np.unique(test_unseen_label.cpu().numpy())).to(self.device)  # [10]
@@ -306,7 +343,6 @@ class DATA_LOADER(object):
         path= self.datadir + 'res101.mat'
         print('_____')
         print(path)
-        pdb.set_trace()
         matcontent = sio.loadmat(path) # keys: 'image_files', 'features', 'labels']
         feature = matcontent['features'].T  # [30475, 2048]
         label = matcontent['labels'].astype(int).squeeze() - 1  # [30475]
