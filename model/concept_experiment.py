@@ -679,9 +679,11 @@ print(acc[-1])
 
 state = {
             'state_dict': model.state_dict() ,
-            'hyperparameters':hyperparameters,
-            'encoder':{},
-            'decoder':{}
+            'hyperparameters': hyperparameters,
+            'encoder': {},
+            'decoder': {},
+            'acc': acc,
+            'history': history,
         }
 for d in model.all_data_sources:
     state['encoder'][d] = model.encoder[d].state_dict()
