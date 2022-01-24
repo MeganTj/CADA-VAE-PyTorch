@@ -3,7 +3,7 @@
 
 # ## Settings:
 
-# In[ ]:
+# In[1]:
 
 
 ### execute this function to train and test the vae-model
@@ -59,7 +59,7 @@ try:
     args.dataset = "c-Line->Eshape"
     args.num_shots = 0
     args.generalized = False
-    args.epochs = 100
+    args.epochs = 5
     args.gpuid = "0"
     is_jupyter = True
 except:
@@ -69,7 +69,7 @@ except:
 
 # ## Model definition:
 
-# In[ ]:
+# In[2]:
 
 
 class LINEAR_LOGSOFTMAX(nn.Module):
@@ -387,9 +387,14 @@ class Model(nn.Module):
             test_novel_X = self.reparameterize(mu1, var1).to(self.device).data
             test_novel_Y = test_novel_label.to(self.device)
 
-            mu2, var2 = self.encoder['resnet_features'](seen_test_feat)  # mu2: [4958, 64]
-            test_seen_X = self.reparameterize(mu2, var2).to(self.device).data
-            test_seen_Y = test_seen_label.to(self.device)
+            if len(seen_test_feat) > 0:
+                mu2, var2 = self.encoder['resnet_features'](seen_test_feat)  # mu2: [4958, 64]
+                test_seen_X = self.reparameterize(mu2, var2).to(self.device).data
+                test_seen_Y = test_seen_label.to(self.device)
+            else:
+                test_seen_X = torch.tensor([]).to(self.device)
+                test_seen_Y = torch.tensor([]).to(self.device)
+                
 
             ####################################
             # preparing the train set:
@@ -518,7 +523,7 @@ class Model(nn.Module):
 
 # ## Model init:
 
-# In[ ]:
+# In[3]:
 
 
 ########################################
@@ -614,6 +619,8 @@ cls_train_steps = [
 hyperparameters['dataset'] = args.dataset
 hyperparameters['num_shots']= args.num_shots
 hyperparameters['generalized']= args.generalized
+print(hyperparameters)
+print(cls_train_steps[0])
 hyperparameters['cls_train_steps'] = [x['cls_train_steps']  for x in cls_train_steps
                                         if all([hyperparameters['dataset']==x['dataset'],
                                         hyperparameters['num_shots']==x['num_shots'],
@@ -649,7 +656,7 @@ model.to(hyperparameters['device'])
 
 # ## Training:
 
-# In[ ]:
+# In[4]:
 
 
 """
@@ -692,4 +699,10 @@ for d in model.all_data_sources:
 
 torch.save(state, 'CADA_trained.pth.tar')
 print('>> saved')
+
+
+# In[ ]:
+
+
+
 
