@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[3]:
 
 
 import numpy as np
@@ -15,12 +15,98 @@ import pdb
 import pickle
 import copy
 
+import sys, os
+sys.path.append(os.path.join(os.path.dirname("__file__"), '..'))
+sys.path.append(os.path.join(os.path.dirname("__file__"), '..', '..'))
+sys.path.append(os.path.join(os.path.dirname("__file__"), '..', '..', '..'))
+# BabyARC-fewshot dataset for classification:
+from reasoning.experiments.concept_energy import get_dataset, ConceptDataset
+from reasoning.pytorch_net.util import init_args, plot_matrices, get_device
+
 def map_label(label, classes):
     mapped_label = torch.LongTensor(label.size())
     for i in range(classes.size(0)):
         mapped_label[label==classes[i]] = i
 
     return mapped_label
+
+
+EMBEDDING_DICT = {
+    "c-Line->Eshape": {
+        "Line": [
+            [1,0,0,0, 0,0,0, 0,0, 0,0],
+            [0,1,0,0, 0,0,0, 0,0, 0,0],
+            [0,0,1,0, 0,0,0, 0,0, 0,0],
+            [0,0,0,1, 0,0,0, 0,0, 0,0],
+        ],
+        "Parallel": [
+            [0,0,0,0, 1,0,0, 0,0, 0,0],
+            [0,0,0,0, 0,1,0, 0,0, 0,0],
+            [0,0,0,0, 0,0,1, 0,0, 0,0],
+        ],
+        "VerticalMid": [
+            [0,0,0,0, 0,0,0, 1,0, 0,0],
+            [0,0,0,0, 0,0,0, 0,1, 0,0],
+        ],
+        "VerticalEdge": [
+            [0,0,0,0, 0,0,0, 0,0, 1,0],
+            [0,0,0,0, 0,0,0, 0,0, 0,1],
+        ],
+        "Eshape": [
+            [1,1,1,1, 1,1,1, 1,0, 1,1],
+        ],
+        "Fshape": [
+            [1,1,1,0, 1,0,0, 1,0, 1,0],
+        ],
+        "Ashape": [
+            [1,1,1,1, 1,1,0, 1,1, 1,1],
+        ],
+    },
+}
+
+
+
+def get_label_embedding_from_c_label(c_label, mode):
+    if mode == "c-Line->Eshape":
+        label_dict = {
+            "Line": [0,1,2,3],
+            "Parallel": [4,5,6],
+            "VerticalMid": [7,8],
+            "VerticalEdge": [9,10],
+            "Eshape": [11],
+            "Fshape": [12],
+            "Ashape": [13],
+        }
+    else:
+        raise
+    c_label_cand = label_dict[c_label]
+    c_embedding_cand = EMBEDDING_DICT[mode][c_label]
+    idx = np.random.choice(len(c_label_cand))
+    c_label = c_label_cand[idx]
+    c_embedding = c_embedding_cand[idx]
+    return c_label, c_embedding
+
+
+LABEL_TO_C_LABEL = {
+    0: "Line",
+    1: "Line",
+    2: "Line",
+    3: "Line",
+    4: "Parallel",
+    5: "Parallel",
+    6: "Parallel",
+    7: "VerticalMid",
+    8: "VerticalMid",
+    9: "VerticalEdge",
+    10: "VerticalEdge",
+    11: "Eshape",
+    12: "Fshape",
+    13: "Ashape",
+}
+
+
+# In[4]:
+
 
 class DATA_LOADER(object):
     def __init__(self, dataset, aux_datasource, device='cuda'):
@@ -47,8 +133,8 @@ class DATA_LOADER(object):
 
         self.all_data_sources = ['resnet_features'] + [self.auxiliary_data_source]
 
-        if self.dataset == 'concept':
-            self.read_matdataset_concept()
+        if self.dataset in ['c-Line->Eshape', 'c-Eshape->RectE']:
+            self.read_matdataset_concept(mode=self.dataset)
         else:
             if self.dataset == 'CUB':
                 self.datadir = self.data_path + '/CUB/'
@@ -75,54 +161,111 @@ class DATA_LOADER(object):
         return batch_label, [ batch_feature, batch_att]
 
 
-    def read_matdataset_concept(self):
+    def read_matdataset_concept(self, mode):
+        """
+        For the concept dataset, during training, the seen classes are
+            "Line", "Parallel", "VerticalMid", "VerticalEdge". Their embeddings are
+            [Line,Line,Line,Line, Parallel,Parallel,Parallel, VerticalMid,VerticalMid, VerticalEdge,VerticalEdge]  # starts at 0,4,7,9
+            during training, if it is a Line e.g., one of the embedding will activate.
 
-        path= self.datadir + 'res101.mat'
-        print('_____')
-        print(path)
-        pdb.set_trace()
-        matcontent = sio.loadmat(path) # keys: 'image_files', 'features', 'labels']
-        feature = matcontent['features'].T  # [30475, 2048]
-        label = matcontent['labels'].astype(int).squeeze() - 1  # [30475]
+        During inference, for a compositional concept, the embeddings corresponding to the concepts will be activated.
+            For example, for Eshape, it will be [1,1,1,1, 1,1,1, 1,0, 1,1]
 
-        path= self.datadir + 'att_splits.mat'
-        matcontent = sio.loadmat(path)
-        # numpy array index starts from 0, matlab starts from 1
-        trainval_loc = matcontent['trainval_loc'].squeeze() - 1  # (19832,)
-        train_loc = matcontent['train_loc'].squeeze() - 1 # (16864,) --> train_feature = TRAIN SEEN
-        val_unseen_loc = matcontent['val_loc'].squeeze() - 1 #(7926,)--> test_unseen_feature = TEST UNSEEN
-        test_seen_loc = matcontent['test_seen_loc'].squeeze() - 1  # (4958,)
-        test_unseen_loc = matcontent['test_unseen_loc'].squeeze() - 1  # (5685,)
+        """
+        if mode == 'c-Line->Eshape':
+            concept_args = init_args({
+                "dataset": "c-Line",
+                "seed": 1,
+                "n_examples": 44000,
+                "canvas_size": 16,
+                "rainbow_prob": 0.,
+                "color_avail": "1,2",
+                "w_type": "image+mask",
+                "max_n_distractors": 2,
+                "min_n_distractors": 0,
+                "allow_connect": True,
+            })
+            concept_dataset, _ = get_dataset(concept_args, is_load=True)
 
+            relation_args = init_args({
+                "dataset": "c-Parallel+VerticalMid+VerticalEdge",
+                "seed": 1,
+                "n_examples": 44000,
+                "canvas_size": 16,
+                "rainbow_prob": 0.,
+                "color_avail": "1,2",
+                "w_type": "image+mask",
+                "max_n_distractors": 3,
+                "min_n_distractors": 0,
+                "allow_connect": True,
+            })
+            relation_dataset, _ = get_dataset(relation_args, is_load=True)
 
-        if self.auxiliary_data_source == 'attributes':
-            self.aux_data = torch.from_numpy(matcontent['att'].T).float().to(self.device)  # [50, 85]
+            test_args = init_args({
+                "dataset": "c-Eshape+Fshape+Ashape",
+                "seed": 2,
+                "n_examples": 400,
+                "canvas_size": 16,
+                "rainbow_prob": 0.,
+                "w_type": "image+mask",
+                "color_avail": "1,2",
+                "min_n_distractors": 0,
+                "max_n_distractors": 0,
+                "allow_connect": True,
+                "parsing_check": False,
+            })
+            test_dataset, _ = get_dataset(test_args, is_load=True)
         else:
-            if self.dataset != 'CUB':
-                print('the specified auxiliary datasource is not available for this dataset')
-            else:
+            raise
 
-                with open(self.datadir + 'CUB_supporting_data.p', 'rb') as h:
-                    x = pickle.load(h)
-                    self.aux_data = torch.from_numpy(x[self.auxiliary_data_source]).float().to(self.device)
+        train_feature = []
+        train_mask = []
+        train_label = []
+        train_att = []
 
+        test_seen_feature = []
+        test_seen_label = []
 
-                print('loaded ', self.auxiliary_data_source)
+        test_unseen_feature = []
+        test_unseen_label = []
+        test_unseen_att = []
 
+        for data in concept_dataset:
+            img, masks, c_label, _ = data  # img: [10,16,16]
+            label, c_embedding = get_label_embedding_from_c_label(c_label, mode=mode)
+            train_feature.append(img)
+            train_label.append(label)
+            train_att.append(c_embedding)
+            train_mask.append(torch.cat([torch.cat(masks), torch.zeros(masks[0].shape)]))
 
-        scaler = preprocessing.MinMaxScaler()
+        for data in relation_dataset:
+            img, masks, c_label, _ = data  # img: [10,16,16]
+            label, c_embedding = get_label_embedding_from_c_label(c_label, mode=mode)
+            train_feature.append(img)
+            train_label.append(label)
+            train_att.append(c_embedding)
+            train_mask.append(torch.cat(masks))
 
-        train_feature = scaler.fit_transform(feature[trainval_loc])  # (19832, 2048)
-        test_seen_feature = scaler.transform(feature[test_seen_loc])  # (4958, 2048)
-        test_unseen_feature = scaler.transform(feature[test_unseen_loc])  # (5685, 2048)
+        for data in test_dataset:
+            img, _, c_label, _ = data  # img: [10,16,16]
+            label, c_embedding = get_label_embedding_from_c_label(c_label, mode=mode)
+            test_unseen_feature.append(img)
+            test_unseen_label.append(label)
+            test_unseen_att.append(c_embedding)
 
-        train_feature = torch.from_numpy(train_feature).float().to(self.device)
-        test_seen_feature = torch.from_numpy(test_seen_feature).float().to(self.device)
-        test_unseen_feature = torch.from_numpy(test_unseen_feature).float().to(self.device)
+        train_feature = torch.stack(train_feature).to(self.device)  # [88000, 10, 16, 16]
+        train_label = torch.LongTensor(train_label).to(self.device)  # [88000]
+        train_att = torch.FloatTensor(train_att).to(self.device)  # [88000, 11]
+        train_mask = torch.stack(train_mask).to(self.device)
 
-        train_label = torch.from_numpy(label[trainval_loc]).long().to(self.device)
-        test_unseen_label = torch.from_numpy(label[test_unseen_loc]).long().to(self.device)
-        test_seen_label = torch.from_numpy(label[test_seen_loc]).long().to(self.device)
+        test_unseen_feature = torch.stack(test_unseen_feature).to(self.device)  # [400, 10, 16, 16]
+        test_unseen_label = torch.LongTensor(test_unseen_label).to(self.device)  # [400]
+        test_unseen_att = torch.FloatTensor(test_unseen_att).to(self.device)  # [400, 11]
+
+        List = []
+        for key, item in EMBEDDING_DICT[mode].items():
+            List += item
+        self.aux_data = torch.FloatTensor(List).to(self.device)
 
         self.seenclasses = torch.from_numpy(np.unique(train_label.cpu().numpy())).to(self.device) # [40]
         self.novelclasses = torch.from_numpy(np.unique(test_unseen_label.cpu().numpy())).to(self.device)  # [10]
@@ -138,24 +281,24 @@ class DATA_LOADER(object):
         self.data['train_seen'] = {}
         self.data['train_seen']['resnet_features'] = train_feature
         self.data['train_seen']['labels']= train_label
-        self.data['train_seen'][self.auxiliary_data_source] = self.aux_data[train_label]
-
+        self.data['train_seen'][self.auxiliary_data_source] = self.aux_data[train_label]   # [19832, 85]
+        self.data['train_seen']['masks'] = train_mask
 
         self.data['train_unseen'] = {}
         self.data['train_unseen']['resnet_features'] = None
         self.data['train_unseen']['labels'] = None
 
         self.data['test_seen'] = {}
-        self.data['test_seen']['resnet_features'] = test_seen_feature
+        self.data['test_seen']['resnet_features'] = test_seen_feature  # [4958, 2048]
         self.data['test_seen']['labels'] = test_seen_label
 
         self.data['test_unseen'] = {}
         self.data['test_unseen']['resnet_features'] = test_unseen_feature
-        self.data['test_unseen'][self.auxiliary_data_source] = self.aux_data[test_unseen_label]
-        self.data['test_unseen']['labels'] = test_unseen_label
+        self.data['test_unseen'][self.auxiliary_data_source] = self.aux_data[test_unseen_label]  # [5685, 85]
+        self.data['test_unseen']['labels'] = test_unseen_label  # [5685]
 
-        self.novelclass_aux_data = self.aux_data[self.novelclasses]
-        self.seenclass_aux_data = self.aux_data[self.seenclasses]
+        self.novelclass_aux_data = self.aux_data[self.novelclasses]  # [3, 11]
+        self.seenclass_aux_data = self.aux_data[self.seenclasses] # [11, 11]
 
 
     def read_matdataset(self):
@@ -221,7 +364,7 @@ class DATA_LOADER(object):
         self.data['train_seen'] = {}
         self.data['train_seen']['resnet_features'] = train_feature
         self.data['train_seen']['labels']= train_label
-        self.data['train_seen'][self.auxiliary_data_source] = self.aux_data[train_label]
+        self.data['train_seen'][self.auxiliary_data_source] = self.aux_data[train_label]  # [19832, 85]
 
 
         self.data['train_unseen'] = {}
