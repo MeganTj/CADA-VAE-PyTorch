@@ -49,6 +49,7 @@ parser.add_argument('--num_shots',type=int)
 parser.add_argument('--generalized', type = str2bool)
 parser.add_argument('--epochs', default=100, type=int)
 parser.add_argument('--batch_size', default=50, type=int)
+parser.add_argument('--gpuid', default="0", type=str)
 
 try:
     get_ipython().run_line_magic('matplotlib', 'inline')
@@ -59,6 +60,7 @@ try:
     args.num_shots = 0
     args.generalized = False
     args.epochs = 100
+    args.gpuid = "0"
     is_jupyter = True
 except:
     args = parser.parse_args()
@@ -522,8 +524,7 @@ class Model(nn.Module):
 ########################################
 # the basic hyperparameters
 ########################################
-gpuid = "2"
-device = get_device(init_args({"gpuid": gpuid}))
+device = get_device(init_args({"gpuid": args.gpuid}))
 hyperparameters = {
     'num_shots': 0,
     'device': device,
@@ -613,7 +614,6 @@ cls_train_steps = [
 hyperparameters['dataset'] = args.dataset
 hyperparameters['num_shots']= args.num_shots
 hyperparameters['generalized']= args.generalized
-
 hyperparameters['cls_train_steps'] = [x['cls_train_steps']  for x in cls_train_steps
                                         if all([hyperparameters['dataset']==x['dataset'],
                                         hyperparameters['num_shots']==x['num_shots'],
