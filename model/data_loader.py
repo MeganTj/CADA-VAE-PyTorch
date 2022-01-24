@@ -1,3 +1,7 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
 
 
 import numpy as np
@@ -382,3 +386,4 @@ class DATA_LOADER(object):
             self.data['train_seen_unseen_mixed']['wordnet'] = torch.cat((self.data['train_seen']['wordnet'],self.data['train_unseen']['wordnet']),dim=0)
 
 #d = DATA_LOADER()
+
