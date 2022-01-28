@@ -3,7 +3,7 @@
 
 # ## Settings:
 
-# In[ ]:
+# In[1]:
 
 
 ### execute this function to train and test the vae-model
@@ -22,7 +22,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.autograd as autograd
 from torch.utils import data
-from data_loader import DATA_LOADER as dataloader
+from data_loader_concept import DATA_LOADER as dataloader
 import final_classifier as  classifier
 import models
 
@@ -58,10 +58,11 @@ try:
     # Experiment management:
     # args.dataset = "AWA1"
     args.dataset = "c-Line->Eshape"
+    args.dataset = "c-Eshape->RectE"
     args.num_shots = 0
     args.generalized = False
-    args.epochs = 5
-    args.load_vae_epoch = 5
+    args.epochs = 10
+    args.load_vae_epoch = 10
     args.gpuid = "0"
     is_jupyter = True
 except:
@@ -71,7 +72,7 @@ except:
 
 # ## Model definition:
 
-# In[ ]:
+# In[2]:
 
 
 class LINEAR_LOGSOFTMAX(nn.Module):
@@ -125,6 +126,10 @@ class Model(nn.Module):
         elif self.DATASET.startswith("c-"):
             if self.DATASET=='c-Line->Eshape':
                 self.num_classes = 14
+                self.num_novel_classes = 3
+                feature_dimensions = [320, self.dataset.aux_data.size(1)]
+            elif self.DATASET=='c-Eshape->RectE':
+                self.num_classes = 16
                 self.num_novel_classes = 3
                 feature_dimensions = [320, self.dataset.aux_data.size(1)]
             else:
@@ -566,6 +571,7 @@ hyperparameters = {
 
 cls_train_steps = [
       {'dataset': 'c-Line->Eshape',  'num_shots': 0, 'generalized': False, 'cls_train_steps': 21},
+      {'dataset': 'c-Eshape->RectE', 'num_shots': 0, 'generalized': False, 'cls_train_steps': 21},
       {'dataset': 'SUN',  'num_shots': 0, 'generalized': True, 'cls_train_steps': 21},
       {'dataset': 'SUN',  'num_shots': 0, 'generalized': False, 'cls_train_steps': 30},
       {'dataset': 'SUN',  'num_shots': 1, 'generalized': True, 'cls_train_steps': 22},
@@ -638,6 +644,7 @@ else:
                                                     'APY': (0, 0, 200, 0), 'AWA1': (0, 0, 200, 0),
                                                     'AWA2': (0, 0, 200, 0), 'FLO': (0, 0, 200, 0),
                                                     'c-Line->Eshape': (0, 0, 200, 0),
+                                                    'c-Eshape->RectE': (0, 0, 200, 0),
                                                }
     else:
         hyperparameters['samples_per_class'] = {'CUB': (0, 0, 200, 200), 'SUN': (0, 0, 200, 200),
@@ -701,4 +708,10 @@ for d in model.all_data_sources:
 if is_save_state:
     torch.save(state, 'CADA_trained_epoch_{}.pth.tar'.format(args.epochs))
     print('>> saved')
+
+
+# In[ ]:
+
+
+
 
