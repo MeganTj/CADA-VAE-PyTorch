@@ -390,10 +390,10 @@ class DATA_LOADER(object):
                 'data_aug': True,
                 'n_cls': 7
             })
-        if mode == 'c-Eshape->RectE':
+        elif mode == 'c-Eshape->RectE':
             model_args = init_args({
                 'model': 'resnet12_ssl',
-                'model_path': '/dfs/user/tailin/.results/fsl_baselines/backup/babyarc_resnet12_ssl_ground_lr_0.005_decay_0.0005_trans_2d_trial_1/model_fresh-flower-42.pth'
+                'model_path': '/dfs/user/tailin/.results/fsl_baselines/backup/babyarc_resnet12_ssl_ground_lr_0.005_decay_0.0005_trans_2d_trial_1/model_fresh-flower-42.pth',
                 'n_deconv_conv': 0,
                 'lst_channels': [64, 160, 320, 640],
                 'is_3d': False,
@@ -713,4 +713,10 @@ if __name__ == "__main__":
         # plot_matrices(masks, images_per_row=6)
         print("attr: {},  label: {} c: {}".format(attr, label, LABEL_TO_C_LABEL[label.item()]))
         print()
+
+
+# In[ ]:
+
+
+
 
