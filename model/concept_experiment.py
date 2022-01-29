@@ -3,7 +3,7 @@
 
 # ## Settings:
 
-# In[1]:
+# In[ ]:
 
 
 ### execute this function to train and test the vae-model
@@ -61,7 +61,7 @@ try:
     args.dataset = "c-Eshape->RectE"
     args.num_shots = 0
     args.generalized = False
-    args.epochs = 10
+    args.epochs = 30
     args.load_vae_epoch = 10
     args.gpuid = "0"
     is_jupyter = True
@@ -72,7 +72,7 @@ except:
 
 # ## Model definition:
 
-# In[2]:
+# In[ ]:
 
 
 class LINEAR_LOGSOFTMAX(nn.Module):
@@ -675,10 +675,16 @@ for d in model.all_data_sources_without_duplicates:
 
 is_save_state = True
 if args.load_vae_epoch != -1:
-    state = torch.load('CADA_trained_epoch_{}.pth.tar'.format(args.load_vae_epoch))
-    for d in state['encoder']:
-        model.encoder[d].load_state_dict(state['encoder'][d])
-        model.decoder[d].load_state_dict(state['decoder'][d])
+    if args.dataset == "c-Line->Eshape":
+        state = torch.load('Line_exp/CADA_trained_epoch_{}.pth.tar'.format(args.load_vae_epoch))
+        for d in state['encoder']:
+            model.encoder[d].load_state_dict(state['encoder'][d])
+            model.decoder[d].load_state_dict(state['decoder'][d])
+    elif args.dataset == "c-Eshape->RectE":
+        state = torch.load('Eshape_exp/CADA_trained_epoch_{}.pth.tar'.format(args.load_vae_epoch))
+        for d in state['encoder']:
+            model.encoder[d].load_state_dict(state['encoder'][d])
+            model.decoder[d].load_state_dict(state['decoder'][d])
 else:
     losses = model.train_vae()
 
@@ -694,24 +700,21 @@ print(acc[-1])
 
 
 state = {
-            'state_dict': model.state_dict() ,
-            'hyperparameters': hyperparameters,
-            'encoder': {},
-            'decoder': {},
-            'acc': acc,
-            'history': history,
-        }
+    'state_dict': model.state_dict() ,
+    'hyperparameters': hyperparameters,
+    'encoder': {},
+    'decoder': {},
+    'acc': acc,
+    'history': history,
+}
 for d in model.all_data_sources:
     state['encoder'][d] = model.encoder[d].state_dict()
     state['decoder'][d] = model.decoder[d].state_dict()
 
 if is_save_state:
-    torch.save(state, 'CADA_trained_epoch_{}.pth.tar'.format(args.epochs))
+    if args.dataset == "c-Line->Eshape":
+        torch.save(state, 'Line_exp/CADA_trained_epoch_{}.pth.tar'.format(args.epochs))
+    elif args.dataset == "c-Eshape->RectE":
+        torch.save(state, 'Eshape_exp/CADA_trained_epoch_{}.pth.tar'.format(args.epochs))
     print('>> saved')
-
-
-# In[ ]:
-
-
-
 
